@@ -16,6 +16,7 @@ import java.util.concurrent.Executors;
 public class Broker {
 
     private boolean done = false;
+    private int clientNumber = 0;
     private Endpoint endpoint = new Endpoint(4711); //endpoint listens on port 4711
     private ClientCollection clients = new ClientCollection(); //broker keeps a list of available clients
 
@@ -52,7 +53,8 @@ public class Broker {
     }
 
     private void register(Message msg) {
-        String id = "tank" + clients.size(); //broker assigns a new ID
+        String id = "tank" + clientNumber; //broker assigns a new ID
+        clientNumber++;
         clients.add(id, msg.getSender()); //new client is added to the clients list
         endpoint.send(msg.getSender(), new RegisterResponse(id)); //RegisterResponse message
     }
