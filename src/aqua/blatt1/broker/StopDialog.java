@@ -15,6 +15,5 @@ public class StopDialog implements Runnable{
         JOptionPane.showMessageDialog(null, "press OK button to stop server");
         broker.stopRequestFlag = true;
         new Poisoner().sendPoison();
-
     }
 }
