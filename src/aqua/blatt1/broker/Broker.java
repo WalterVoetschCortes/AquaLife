@@ -123,4 +123,45 @@ public class Broker {
         endpoint.send(neighborReceiver, handoffRequest);
     }
 
+    /*
+    Message type NeighborUpdate with which the Broker can give
+    the InetSocketAddress of a new left or right neighbor to a client
+    */
+    final class Neighbor {
+        private String id;
+
+        public Neighbor(String id) {
+            this.id = id;
+        }
+
+        public InetSocketAddress getRightNeighborSocket() {
+            InetSocketAddress rightNeighborSocket;
+            rightNeighborSocket = (InetSocketAddress) clients.getRightNeighorOf(clients.indexOf(id));
+            return rightNeighborSocket;
+        }
+
+        public InetSocketAddress getInitialRightNeighborSocket() {
+            InetSocketAddress initialRightNeighborSocket;
+            int indexInitalRightNeighborSocket = clients.indexOf(clients.getRightNeighorOf(clients.indexOf(id)));
+            initialRightNeighborSocket = (InetSocketAddress) clients.getRightNeighorOf(indexInitalRightNeighborSocket);
+            return initialRightNeighborSocket;
+        }
+
+        public InetSocketAddress getLeftNeighborSocket() {
+            InetSocketAddress leftNeighborSocket;
+            leftNeighborSocket = (InetSocketAddress) clients.getLeftNeighorOf(clients.indexOf(id));
+            return leftNeighborSocket;
+        }
+
+        public InetSocketAddress getInitialLeftNeighborSocket() {
+            InetSocketAddress initialLeftNeighborSocket;
+            int indexInitialLeftNeighborSocket = clients.indexOf(clients.getLeftNeighorOf(clients.indexOf(id)));
+            initialLeftNeighborSocket = (InetSocketAddress) clients.getLeftNeighorOf(indexInitialLeftNeighborSocket);
+            return initialLeftNeighborSocket;
+        }
+    }
+
+
+
+
 }
