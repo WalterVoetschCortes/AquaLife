@@ -98,6 +98,7 @@ public class Broker {
         //the first client in the distributed environment is its own left and right neighbor:
         if(clients.size() == 1){
             endpoint.send(msg.getSender(), new NeighborUpdate(newClientAddress, newClientAddress));
+            endpoint.send(msg.getSender(), new Token()); // broker issues the token to the first client that registers
         } else {
             //right neighbor of new client receives addresses of his new left and right neighbor:
             endpoint.send(newNeighbor.getRightNeighborSocket(), new NeighborUpdate(newClientAddress,

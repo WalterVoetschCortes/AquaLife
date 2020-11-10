@@ -1,16 +1,13 @@
 package aqua.blatt1.client;
 
 import java.net.InetSocketAddress;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.Observable;
-import java.util.Random;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.FishModel;
+import aqua.blatt1.common.msgtypes.Token;
 
 public class TankModel extends Observable implements Iterable<FishModel> {
 
@@ -24,6 +21,8 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 	protected final ClientCommunicator.ClientForwarder forwarder;
 	public InetSocketAddress rightNeighbor;
 	public InetSocketAddress leftNeighbor;
+	protected boolean boolToken;
+	Timer timer = new Timer();
 
 	public TankModel(ClientCommunicator.ClientForwarder forwarder) {
 		this.fishies = Collections.newSetFromMap(new ConcurrentHashMap<FishModel, Boolean>());
@@ -106,6 +105,43 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 	public void updateNeighbors(InetSocketAddress addressLeft, InetSocketAddress addressRight) {
 		this.leftNeighbor = addressLeft;
 		this.rightNeighbor = addressRight;
+	}
+
+
+	// method for receiving the token:
+	public synchronized void receiveToken(Token token){
+		/*
+		If the TankModel receives the token,
+		the boolean variable is set and the timer a timer task for execution
+		after e.g. 2 seconds passed.
+		In the TimerTask the Boolean variable
+		reset and the token forwarded to the left neighbor.
+		*/
+
+		this.boolToken = true;
+
+		timer.schedule(new TimerTask() {
+			@Override
+			public void run() {
+				boolToken = false;
+				forwarder.sendToken(leftNeighbor, token);
+			}
+		}, 10*1000);
+	}
+
+	// method for querying the token:
+	public synchronized void hasToken(FishModel fish){
+		/*
+		TankModel is only allowed to send fish to neighbors when it holds the Token.
+		If a fish hits the edge of the aquarium while the aquarium is not holding the token,
+		it changes its swimming direction.
+		*/
+
+		if(boolToken){
+			forwarder.handOff(fish, rightNeighbor, leftNeighbor);
+		}else {
+			fish.reverse();
+		}
 	}
 
 }
