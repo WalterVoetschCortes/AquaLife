@@ -2,10 +2,7 @@ package aqua.blatt1.broker;
 
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.FishModel;
-import aqua.blatt1.common.msgtypes.DeregisterRequest;
-import aqua.blatt1.common.msgtypes.HandoffRequest;
-import aqua.blatt1.common.msgtypes.RegisterRequest;
-import aqua.blatt1.common.msgtypes.RegisterResponse;
+import aqua.blatt1.common.msgtypes.*;
 import messaging.Endpoint;
 import messaging.Message;
 
@@ -93,13 +90,43 @@ public class Broker {
         clients.add(id, msg.getSender()); //new client is added to the clients list
         clientLock.writeLock().unlock();
 
+        Neighbor newNeighbor = new Neighbor(id); //to get neighbors of the new client
+
+        //address of new client:
+        InetSocketAddress newClientAddress = (InetSocketAddress) clients.getClient(clients.indexOf(id));
+
+        //the first client in the distributed environment is its own left and right neighbor:
+        if(clients.size() == 1){
+            endpoint.send(msg.getSender(), new NeighborUpdate(newClientAddress, newClientAddress));
+        } else {
+            //right neighbor of new client receives addresses of his new left and right neighbor:
+            endpoint.send(newNeighbor.getRightNeighborSocket(), new NeighborUpdate(newClientAddress,
+                    newNeighbor.getInitialRightNeighborSocket()));
+
+            //left neighbor of new client receives addresses of his left and new right neighbor:
+            endpoint.send(newNeighbor.getLeftNeighborSocket(), new NeighborUpdate(newNeighbor.getInitialLeftNeighborSocket(),
+                    newClientAddress));
+
+            endpoint.send(newClientAddress, new NeighborUpdate(newNeighbor.getLeftNeighborSocket(),
+                    newNeighbor.getRightNeighborSocket()));
+        }
+
         endpoint.send(msg.getSender(), new RegisterResponse(id)); //RegisterResponse message
     }
 
     private void deregister(Message msg) {
+        String removeID = ((DeregisterRequest) msg.getPayload()).getId(); //ID of the deleted client
+        Neighbor removedNeighbor = new Neighbor(removeID); //to get neighbors of the deleted client
+
+        //affected clients are the left and right neighbors of the client to be deleted:
+        endpoint.send(removedNeighbor.getLeftNeighborSocket(), new NeighborUpdate(
+                removedNeighbor.getInitialLeftNeighborSocket(), removedNeighbor.getRightNeighborSocket()));
+        endpoint.send(removedNeighbor.getRightNeighborSocket(), new NeighborUpdate(
+                removedNeighbor.getLeftNeighborSocket(), removedNeighbor.getInitialRightNeighborSocket()));
+
         clientLock.writeLock().lock();
         //broker removes the client from the client list:
-        clients.remove(clients.indexOf(((DeregisterRequest) msg.getPayload()).getId()));
+        clients.remove(clients.indexOf(removeID));
         clientLock.writeLock().unlock();
     }
 
@@ -123,10 +150,6 @@ public class Broker {
         endpoint.send(neighborReceiver, handoffRequest);
     }
 
-    /*
-    Message type NeighborUpdate with which the Broker can give
-    the InetSocketAddress of a new left or right neighbor to a client
-    */
     final class Neighbor {
         private String id;
 
@@ -142,8 +165,8 @@ public class Broker {
 
         public InetSocketAddress getInitialRightNeighborSocket() {
             InetSocketAddress initialRightNeighborSocket;
-            int indexInitalRightNeighborSocket = clients.indexOf(clients.getRightNeighorOf(clients.indexOf(id)));
-            initialRightNeighborSocket = (InetSocketAddress) clients.getRightNeighorOf(indexInitalRightNeighborSocket);
+            int indexInitialRightNeighborSocket = clients.indexOf(clients.getRightNeighorOf(clients.indexOf(id)));
+            initialRightNeighborSocket = (InetSocketAddress) clients.getRightNeighorOf(indexInitialRightNeighborSocket);
             return initialRightNeighborSocket;
         }
 
