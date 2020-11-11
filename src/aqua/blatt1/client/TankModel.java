@@ -36,8 +36,8 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 
 	public synchronized void newFish(int x, int y) {
 		if (fishies.size() < MAX_FISHIES) {
-			x = x > WIDTH - FishModel.getXSize() - 1 ? WIDTH - FishModel.getXSize() - 1 : x;
-			y = y > HEIGHT - FishModel.getYSize() ? HEIGHT - FishModel.getYSize() : y;
+			x = Math.min(x, WIDTH - FishModel.getXSize() - 1);
+			y = Math.min(y, HEIGHT - FishModel.getYSize());
 
 			FishModel fish = new FishModel("fish" + (++fishCounter) + "@" + getId(), x, y,
 					rand.nextBoolean() ? Direction.LEFT : Direction.RIGHT);
@@ -70,7 +70,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 			fish.update();
 
 			if (fish.hitsEdge())
-				forwarder.handOff(fish, leftNeighbor, rightNeighbor);
+				hasToken(fish);
 
 			if (fish.disappears())
 				it.remove();
@@ -132,7 +132,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 	// method for querying the token:
 	public synchronized void hasToken(FishModel fish){
 		/*
-		TankModel is only allowed to send fish to neighbors when it holds the Token.
+		TankModel is only allowed to send fish to neighbors when it holds the token.
 		If a fish hits the edge of the aquarium while the aquarium is not holding the token,
 		it changes its swimming direction.
 		*/

@@ -55,7 +55,7 @@ public class TankView extends JPanel implements Observer {
 		The token wandering is visualized by the
 		aquarium borders drawn as long as the token is not there.
 		*/
-		if (tankModel.boolToken == false){
+		if (!tankModel.boolToken){
 			drawBorders(g2d);
 		}
 
