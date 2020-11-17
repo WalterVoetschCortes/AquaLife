@@ -3,10 +3,15 @@ package aqua.blatt1.client;
 import java.net.InetSocketAddress;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.FishModel;
+import aqua.blatt1.common.RecordsState;
+import aqua.blatt1.common.msgtypes.Collector;
+import aqua.blatt1.common.msgtypes.SnapshotMarker;
 import aqua.blatt1.common.msgtypes.Token;
 
 public class TankModel extends Observable implements Iterable<FishModel> {
@@ -23,6 +28,14 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 	public InetSocketAddress leftNeighbor;
 	protected boolean boolToken;
 	Timer timer = new Timer();
+	protected RecordsState record = RecordsState.IDLE;
+	protected int localFishies;
+	protected boolean initiatorReady = false;
+	protected boolean waitForIDLE = false;
+	protected int showGlobalSnapshot;
+	protected boolean showDialog;
+	public static final int NUMTHREADS = 5;
+	ExecutorService executor = Executors.newFixedThreadPool(NUMTHREADS);
 
 	public TankModel(ClientCommunicator.ClientForwarder forwarder) {
 		this.fishies = Collections.newSetFromMap(new ConcurrentHashMap<FishModel, Boolean>());
@@ -141,6 +154,85 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 			forwarder.handOff(fish, rightNeighbor, leftNeighbor);
 		}else {
 			fish.reverse();
+		}
+	}
+
+	public void initiateSnapshot() {
+		if (record == RecordsState.IDLE) {
+			localFishies = fishies.size();
+			record = RecordsState.BOTH;
+			initiatorReady = true;
+			forwarder.sendSnapshotMarker(leftNeighbor, new SnapshotMarker());
+			forwarder.sendSnapshotMarker(rightNeighbor, new SnapshotMarker());
+		}
+
+	}
+
+	public void onReceiveCollector(Collector collector) {
+		waitForIDLE = true;
+		executor.execute(new Runnable() {
+			@Override
+			public void run() {
+				while (waitForIDLE)
+					if (record == RecordsState.IDLE) {
+						int currentFishState = collector.getLocalfishies();
+						int newFishState = currentFishState + localFishies;
+						forwarder.sendCollector(leftNeighbor, new Collector(newFishState));
+						waitForIDLE = false;
+					}
+			}
+		});
+
+		if (initiatorReady) {
+			initiatorReady = false;
+			showDialog=true;
+			System.out.println(collector.getLocalfishies() + " fishies");
+			showGlobalSnapshot = collector.getLocalfishies();
+		}
+	}
+
+	public void receiveSnapshotMarker(InetSocketAddress sender, SnapshotMarker snapshotMarker) {
+		if (record == RecordsState.IDLE) {
+			localFishies = fishies.size();
+			if (!leftNeighbor.equals(rightNeighbor)) {
+				if (sender.equals(leftNeighbor)) {
+					record = RecordsState.RIGHT;
+				} else if (sender.equals(rightNeighbor)) {
+					record = RecordsState.LEFT;
+				}
+			} else {
+				record = RecordsState.BOTH;
+			}
+			if (leftNeighbor.equals(rightNeighbor)) {
+				forwarder.sendSnapshotMarker(leftNeighbor, snapshotMarker);
+			} else {
+				forwarder.sendSnapshotMarker(leftNeighbor, snapshotMarker);
+				forwarder.sendSnapshotMarker(rightNeighbor, snapshotMarker);
+			}
+
+		} else {
+			if (!leftNeighbor.equals(rightNeighbor)) {
+				if (sender.equals(leftNeighbor)) {
+					if (record == RecordsState.BOTH) {
+						record = RecordsState.RIGHT;
+					}
+					if (record == RecordsState.LEFT) {
+						record = RecordsState.IDLE;
+					}
+				} else {
+					if (record == RecordsState.BOTH) {
+						record = RecordsState.LEFT;
+					}
+					if (record == RecordsState.RIGHT) {
+						record = RecordsState.IDLE;
+					}
+				}
+			} else {
+				record = RecordsState.IDLE;
+			}
+		}
+		if (initiatorReady && record == RecordsState.IDLE) {
+			forwarder.sendCollector(leftNeighbor, new Collector(localFishies));
 		}
 	}
 
