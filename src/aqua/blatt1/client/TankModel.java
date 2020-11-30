@@ -8,9 +8,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import aqua.blatt1.common.Direction;
+import aqua.blatt1.common.FishLocation;
 import aqua.blatt1.common.FishModel;
 import aqua.blatt1.common.RecordsState;
 import aqua.blatt1.common.msgtypes.Collector;
+import aqua.blatt1.common.msgtypes.LocationRequest;
 import aqua.blatt1.common.msgtypes.SnapshotMarker;
 import aqua.blatt1.common.msgtypes.Token;
 
@@ -36,6 +38,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 	protected boolean showDialog;
 	public static final int NUMTHREADS = 5;
 	ExecutorService executor = Executors.newFixedThreadPool(NUMTHREADS);
+	Map<String, FishLocation> fishLocationMap = new HashMap<>();
 
 	public TankModel(ClientCommunicator.ClientForwarder forwarder) {
 		this.fishies = Collections.newSetFromMap(new ConcurrentHashMap<FishModel, Boolean>());
@@ -85,8 +88,14 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 			if (fish.hitsEdge())
 				hasToken(fish);
 
-			if (fish.disappears())
+			if (fish.disappears()){
+				if (fish.getDirection() == Direction.LEFT) {
+					fishLocationMap.put(fish.getId(), FishLocation.LEFT);
+				} else if (fish.getDirection() == Direction.RIGHT) {
+					fishLocationMap.put(fish.getId(), FishLocation.RIGHT);
+				}
 				it.remove();
+			}
 		}
 	}
 
@@ -235,5 +244,28 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 			forwarder.sendCollector(leftNeighbor, new Collector(localFishies));
 		}
 	}
+
+	public void locateFishGlobally(String fishID) {
+		FishLocation fishLocation = fishLocationMap.get(fishID);
+		if (fishLocation == FishLocation.HERE) { //fish is in this tank, so locate fish locally
+			locateFishLocally(fishID);
+		} else {
+			if (fishLocation == FishLocation.LEFT) { //search must be passed on to the left neighbor
+				forwarder.sendLocationRequest(leftNeighbor, new LocationRequest(fishID));
+			} else { //search must be passed on to the left neighbor
+				forwarder.sendLocationRequest(rightNeighbor, new LocationRequest(fishID));
+			}
+		}
+	}
+
+	private void locateFishLocally(String fishID){
+		//if fish with fishID is in tank, mark it with method FishModel.toggle
+		for(FishModel fish: this.fishies){
+			if(fish.getId().equals(fishID)){
+				fish.toggle();
+			}
+		}
+	}
+
 
 }
