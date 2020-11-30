@@ -63,6 +63,14 @@ public class Broker {
                 InetSocketAddress inetSocketAddress = m.getSender();
                 handoffFish(handoffRequest,inetSocketAddress);
             }
+
+            if(s instanceof NameResolutionRequest){
+                String TankID = ((NameResolutionRequest)  s).getTankID();
+                String RequestID = ((NameResolutionRequest)  s).getRequestID();
+                InetSocketAddress sender = m.getSender();
+                sendInetSocketResponse(TankID, RequestID, sender);
+
+            }
         }
     }
 
@@ -184,6 +192,12 @@ public class Broker {
             return initialLeftNeighborSocket;
         }
     }
+
+    private void sendInetSocketResponse(String TankID, String RequestID, InetSocketAddress sender) {
+        InetSocketAddress homeClient = (InetSocketAddress) clients.getClient(clients.indexOf(TankID));
+        endpoint.send(sender, new NameResolutionResponse(homeClient, RequestID));
+    }
+
 
 
 
