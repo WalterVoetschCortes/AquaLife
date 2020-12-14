@@ -42,9 +42,22 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 		this.forwarder = forwarder;
 	}
 
-	synchronized void onRegistration(String id) {
+	synchronized void onRegistration(String id, int leaseLength) {
+
+		/*
+		When a RegisterResponse message is received, a timer is started which, within the lease period
+		performs a reregistration with the broker.
+		 */
+		timer.schedule(new TimerTask() {
+			@Override
+			public void run() {
+				forwarder.register();
+			}
+		}, leaseLength * 1000);
 		this.id = id;
-		newFish(WIDTH - FishModel.getXSize(), rand.nextInt(HEIGHT - FishModel.getYSize()));
+		if(fishCounter == 0){
+			newFish(WIDTH - FishModel.getXSize(), rand.nextInt(HEIGHT - FishModel.getYSize()));
+		}
 	}
 
 	public synchronized void newFish(int x, int y) {
@@ -272,6 +285,11 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 
 	public void updateCurrentLocation(String fishID, InetSocketAddress currentLocation) {
 		homeAgent.put(fishID, currentLocation);
+	}
+
+	public void leasingRunOut(){
+		forwarder.deregister(id);
+		System.exit(0);
 	}
 
 

@@ -8,6 +8,9 @@ import messaging.Message;
 
 import java.io.Serializable;
 import java.net.InetSocketAddress;
+import java.util.Date;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -15,16 +18,19 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class Broker {
 
-    private boolean done = false;
+    private final boolean done = false;
     private int clientNumber = 0;
-    private Endpoint endpoint = new Endpoint(4711); //endpoint listens on port 4711
-    private volatile ClientCollection clients = new ClientCollection(); //broker keeps a list of available clients
+    private final Endpoint endpoint = new Endpoint(4711); //endpoint listens on port 4711
+    private final ClientCollection<InetSocketAddress> clients = new ClientCollection<>(); //broker keeps a list of available clients
 
-    private int POOL_SIZE = 3;
+    int leaseLength = 10;
+    Timer timer = new Timer();
+
+    private final int POOL_SIZE = 3;
     //thread pool of constant size for processing incoming requests:
-    private ExecutorService executor = Executors.newFixedThreadPool(POOL_SIZE);
+    private final ExecutorService executor = Executors.newFixedThreadPool(POOL_SIZE);
     //to synchronize competing accesses of client collection:
-    private ReadWriteLock clientLock = new ReentrantReadWriteLock();
+    private final ReadWriteLock clientLock = new ReentrantReadWriteLock();
 
     //thread that gives the user the opportunity to shut down the server with a graphical input mask.
     //once the user has made the appropriate input, this thread should set the stopRequested flag.
@@ -76,6 +82,28 @@ public class Broker {
 
     public void broker(){
 
+        timer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                Date timestamp = new Date();
+                System.out.println(clients.size());
+                if (clients.size() > 0) {
+                    for (int i = 0; i < clients.size(); i++) {
+                        Date tempTimestamp = clients.getTimestamp(i);
+                        System.out.println(tempTimestamp);
+                        long leasingTime = timestamp.getTime() - tempTimestamp.getTime();
+                        System.out.println(leasingTime);
+                        if (leasingTime > 10 * 1000) {
+                            endpoint.send(clients.getClient(i), new LeasingRunOut());
+                        }
+                    }
+                }
+
+
+            }
+        }, 0, 3 * 1000);
+
+
         stopThread.start();
         while(!stopRequestFlag) {
             //incoming messages must be decoded and the appropriate methods called:
@@ -91,36 +119,40 @@ public class Broker {
     }
 
     private void register(Message msg) {
-        String id = "tank" + clientNumber; //broker assigns a new ID
-        clientNumber++;
 
-        clientLock.writeLock().lock();
-        clients.add(id, msg.getSender()); //new client is added to the clients list
-        clientLock.writeLock().unlock();
+        Date timestamp = new Date();
+        if (clients.indexOf(msg.getSender()) == -1) {
+            String id = "tank" + clientNumber; //broker assigns a new ID
+            clientNumber++;
 
-        Neighbor newNeighbor = new Neighbor(id); //to get neighbors of the new client
+            clientLock.writeLock().lock();
+            clients.add(id, msg.getSender(), timestamp); //new client is added to the clients list
+            clientLock.writeLock().unlock();
 
-        //address of new client:
-        InetSocketAddress newClientAddress = (InetSocketAddress) clients.getClient(clients.indexOf(id));
+            Neighbor neighbor = new Neighbor(id); //to get neighbors of the new client
 
-        //the first client in the distributed environment is its own left and right neighbor:
-        if(clients.size() == 1){
-            endpoint.send(msg.getSender(), new NeighborUpdate(newClientAddress, newClientAddress));
-            endpoint.send(msg.getSender(), new Token()); // broker issues the token to the first client that registers
+            //address of new client:
+            InetSocketAddress newClientAddress = clients.getClient(clients.indexOf(id));
+
+            //the first client in the distributed environment is its own left and right neighbor:
+            if (clients.size() == 1) {
+                endpoint.send(msg.getSender(), new NeighborUpdate(newClientAddress, newClientAddress));
+                endpoint.send(msg.getSender(), new Token());
+            } else {
+                //right neighbor of new client receives addresses of his new left and right neighbor:
+                endpoint.send(neighbor.getRightNeighborSocket(), new NeighborUpdate(neighbor.getInitialRightNeighborSocket(), newClientAddress));
+                //left neighbor of new client receives addresses of his left and new right neighbor:
+                endpoint.send(neighbor.getLeftNeighborSocket(), new NeighborUpdate(newClientAddress, neighbor.getInitialLeftNeighborSocket()));
+                endpoint.send(newClientAddress, new NeighborUpdate(neighbor.getRightNeighborSocket(), neighbor.getLeftNeighborSocket()));
+            }
+
+            endpoint.send(msg.getSender(), new RegisterResponse(id, leaseLength));//RegisterResponse message
         } else {
-            //right neighbor of new client receives addresses of his new left and right neighbor:
-            endpoint.send(newNeighbor.getRightNeighborSocket(), new NeighborUpdate(newClientAddress,
-                    newNeighbor.getInitialRightNeighborSocket()));
-
-            //left neighbor of new client receives addresses of his left and new right neighbor:
-            endpoint.send(newNeighbor.getLeftNeighborSocket(), new NeighborUpdate(newNeighbor.getInitialLeftNeighborSocket(),
-                    newClientAddress));
-
-            endpoint.send(newClientAddress, new NeighborUpdate(newNeighbor.getLeftNeighborSocket(),
-                    newNeighbor.getRightNeighborSocket()));
+            System.out.println("look if already registered");
+            int index = clients.indexOf(msg.getSender());
+            clients.setTimestamp(index, timestamp);
+            endpoint.send(msg.getSender(), new RegisterResponse(clients.getId(index), leaseLength));
         }
-
-        endpoint.send(msg.getSender(), new RegisterResponse(id)); //RegisterResponse message
     }
 
     private void deregister(Message msg) {
@@ -149,10 +181,10 @@ public class Broker {
 
         clientLock.readLock().lock();
         if (direction == Direction.LEFT) {
-            neighborReceiver = (InetSocketAddress) clients.getLeftNeighorOf(index);
+            neighborReceiver = clients.getLeftNeighorOf(index);
         }
         else {
-            neighborReceiver = (InetSocketAddress) clients.getRightNeighorOf(index);
+            neighborReceiver = clients.getRightNeighorOf(index);
         }
         clientLock.readLock().unlock();
 
@@ -168,33 +200,33 @@ public class Broker {
 
         public InetSocketAddress getRightNeighborSocket() {
             InetSocketAddress rightNeighborSocket;
-            rightNeighborSocket = (InetSocketAddress) clients.getRightNeighorOf(clients.indexOf(id));
+            rightNeighborSocket = clients.getRightNeighorOf(clients.indexOf(id));
             return rightNeighborSocket;
         }
 
         public InetSocketAddress getInitialRightNeighborSocket() {
             InetSocketAddress initialRightNeighborSocket;
             int indexInitialRightNeighborSocket = clients.indexOf(clients.getRightNeighorOf(clients.indexOf(id)));
-            initialRightNeighborSocket = (InetSocketAddress) clients.getRightNeighorOf(indexInitialRightNeighborSocket);
+            initialRightNeighborSocket = clients.getRightNeighorOf(indexInitialRightNeighborSocket);
             return initialRightNeighborSocket;
         }
 
         public InetSocketAddress getLeftNeighborSocket() {
             InetSocketAddress leftNeighborSocket;
-            leftNeighborSocket = (InetSocketAddress) clients.getLeftNeighorOf(clients.indexOf(id));
+            leftNeighborSocket = clients.getLeftNeighorOf(clients.indexOf(id));
             return leftNeighborSocket;
         }
 
         public InetSocketAddress getInitialLeftNeighborSocket() {
             InetSocketAddress initialLeftNeighborSocket;
             int indexInitialLeftNeighborSocket = clients.indexOf(clients.getLeftNeighorOf(clients.indexOf(id)));
-            initialLeftNeighborSocket = (InetSocketAddress) clients.getLeftNeighorOf(indexInitialLeftNeighborSocket);
+            initialLeftNeighborSocket = clients.getLeftNeighorOf(indexInitialLeftNeighborSocket);
             return initialLeftNeighborSocket;
         }
     }
 
     private void sendInetSocketResponse(String TankID, String RequestID, InetSocketAddress sender) {
-        InetSocketAddress homeClient = (InetSocketAddress) clients.getClient(clients.indexOf(TankID));
+        InetSocketAddress homeClient = clients.getClient(clients.indexOf(TankID));
         endpoint.send(sender, new NameResolutionResponse(homeClient, RequestID));
     }
 
